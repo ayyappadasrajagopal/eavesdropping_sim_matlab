@@ -119,21 +119,24 @@ y=zeros(m1,N);                    % output vector initialized to all zero values
 
 x1(:,1)= zeros(n,1);   % initializing vector for system dyanmics
 y1a=zeros(m1,N+1);     % output vector initialized to all zero values
+
 open_mse1 = zeros(n,n);
-open_mse2 = zeros(n,n);
+open_mse1_f = zeros(n,n);
+open_mse1_c = zeros(n,n);
 open_empiricalmse1 = zeros(n,n);
-open_empiricalmse2 = zeros(n,n);
+open_empiricalmse1_f = zeros(n,n);
+open_empiricalmse1_c = zeros(n,n);
 
 %% Working loops
 %%-------------------------------------------------------------------------
 
 for kkb = 1:length(prob)
 p = prob(kkb);              % probability/rate of arrival is inherent by
-p2 = p;                                               
+                            % the SNR                         
 open_mse1_iter = zeros(n);  % initailize error covaraince matrices for averaging loop
 open_empiricalmse1_iter = zeros(n); 
-open_empiricalmse2_iter = zeros(n);
-open_mse2_iter = zeros(n);
+open_empiricalmse1_c_iter = zeros(n);
+open_mse1_c_iter = zeros(n);
 x_des = [45 0];
 x_des = x_des*(pi/180);
 
@@ -141,12 +144,17 @@ for kk=1:N_A % System dynamics averaging
 
 %%%%%%%%%%%%% For the first candidate only one time %%%%%%%%%%%%%%%%%%%%%%%
 y(:,1) = C*x(:,1) + sqrtR*randn(m1,1);
-y2(:,1) = C2*x(:,1) + sqrtR*randn(m2,1);
+y2(:,1) = C_a*x(:,1) + sqrtR*randn(m2,1);
+%y_rem(:,1) = C_rem*x(:,1) + sqrtR_rem*randn(m1_rem,1); % Homogenous sensor 
+%y_f(:,1) = y(:,1)+ (R/(R+R_rem))*(y_rem(:,1)-y(:,1));
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %% Initialization of error covarinace matrices
 P1 = eye(n); % Error covarinace matrices initialized to identity maytrices.
 P2 = eye(n);
+%P1_f = eye(n);
+%P1_c = eye(n);
 
 zeta = 1;  % varibale for packet arrival initilaized with one
 
@@ -154,8 +162,12 @@ open_empiricalmse = zeros(1,n); %average error*error
 open_mse = zeros(n);            %average P_k
 open_mse_2 = zeros(n);
 open_empiricalmse_2 = zeros(n);
+
 hatx1 = zeros(n,1);
 hatx2 = zeros(n,1);
+%hatx1_c = zeros(n,1);
+%hatx1_f = zeros(n,1);
+%hatx1_rem = zeros(n,1);
 
 open_error1_vec = zeros(n,N);
 K_opt= dlqr(A,B,Q_c,R_c);
@@ -173,10 +185,11 @@ x(:,k+1) = A*x(:,k) + B*u+ wk;   % system/state dynamics
 
 % Subsystem 1
 vk = sqrtR*randn(m1,1);          % measurement noise
-vk2 = sqrtR_rem*randn(m2,1);  % measurement noise of remote sensor
+vk_rem = sqrtR_rem*randn(m1,1);  % measurement noise of remote sensor
 
 y(:,k+1) = C*x(:,k+1) + vk;
-y2(:,k+1) = C2*x(:,k+1) + vk2;
+y_rem(:,k+1) = C_rem*x(:,k+1) + vk_rem;
+y_f(:,k+1) = y(:,k+1)+ (R/(R+R_rem))*(y_rem(:,k+1)-y(:,k+1));
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -184,7 +197,7 @@ y2(:,k+1) = C2*x(:,k+1) + vk2;
 %%------------------------
 
     zeta = double(rand(1,1) <= p);
-    zeta2 = double(rand(1,1) <= p2);
+  
     %prediction step
 	hatx1 = A*hatx1 +B*u; 
     P1 = A * P1 * A' + Q;
@@ -202,25 +215,27 @@ y2(:,k+1) = C2*x(:,k+1) + vk2;
     open_empiricalmse1 = open_empiricalmse1 + open_error1 * open_error1';
     open_error1_vec(:,k) = open_error1;   
 
-%%  2. Eavesdropper State Estimation 
+%%  2. Fusion based State Estimation 
 %%------------------------------------ 
 
-     %prediction step
-	hatx2 = A*hatx2 +B*u; 
-    P2 = A * P2 * A' + Q;
+    %prediction step
+	hatx1_f = A*hatx1_f +B*u; 
+    P1_f = A * P1_f * A' + Q;
+    hatx1_ar_f(:,k+1)= hatx1_f;
+    
     % Correction step
-    L2 = P2 * C2'/( C2*P1*C2' + R);
-    if zeta2~=0 % on if no local hardwired sensors are available
-    hatx2 = (eye(n) - L2*C2)*hatx2 + L2*y2(:,k);
-    P2 = P2 - L2*C2*P2;
-    seq2(1,k) = zeta2;
-    end
-    hatx2_ar(:,k+1)= hatx2;
+    L1_f = P1_f * C'/( C*P1_f*C' + R_f);
 
-    open_mse2 = open_mse2 + P2;
-    open_error2 = x(:,k) - hatx2;
-    open_empiricalmse2 = open_empiricalmse2 + open_error2 * open_error2';
-    open_error2_vec(:,k) = open_error2;   
+    y_f(:,k+1) = y(:,k+1)+ (R/(R+R_rem))*(y_rem(:,k+1)-y(:,k+1));
+    if zeta~=0 
+    hatx1_f = (eye(n) - L1_f*C)*hatx1_f + L1_f*y_f(:,k);
+    P1_f = P1_f - L1_f*C*P1_f;
+    seq_f(1,k) = zeta;
+    end
+
+    open_mse1_f = open_mse1_f + P1_f;
+    open_error1_f = x(:,k) - hatx1_f;
+    open_empiricalmse1_f = open_empiricalmse1_f + open_error1_f * open_error1_f';
 
 end
 
